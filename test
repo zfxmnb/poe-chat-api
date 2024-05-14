@@ -1,0 +1,39 @@
+// 登录
+fetch('/api/signin', {
+  method: 'POST',
+  body: JSON.stringify({ username: 'admin', password: '123456' }),
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+// 修改poe配置
+fetch('/api/tokens', {
+  method: 'POST',
+  body: JSON.stringify({ b: 'xxx', lat: 'yyy' }),
+  headers: { 'Content-Type': 'application/json' }
+})
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+
+// 获取聊天记录
+fetch('/api/chats')
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+// 获取聊天详情
+fetch('/api/chats/<chatId>/info')
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+// get方式发送聊天
+fetch('/api/chats/<chatId>/send?mes=讲个笑话')
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+// post方式发送聊天
+fetch('/api/chats/<chatId>/send', {
+  method: 'POST',
+  body: JSON.stringify({ mes: '讲个笑话' }),
+  headers: { 'Content-Type': 'application/json' }
+})
+  .then((res) => res.json())
+  .then((data) => console.log(data));
