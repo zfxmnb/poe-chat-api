@@ -16,13 +16,20 @@ fetch('/api/tokens', {
 })
   .then((res) => res.json())
   .then((data) => console.log(data));
-
 // 获取聊天记录
 fetch('/api/chats')
   .then((res) => res.json())
   .then((data) => console.log(data));
 // 获取聊天详情
 fetch('/api/chats/<chatId>/info')
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+// 获取聊天详情
+fetch('/api/chats/create', { prompt: '中文小助手' })
+  .then((res) => res.json())
+  .then((data) => console.log(data));
+// 删除聊天详情
+fetch('/api/chats/delete', { bot: 'xxx', chatId: 'yyy' })
   .then((res) => res.json())
   .then((data) => console.log(data));
 // get方式发送聊天

@@ -81,6 +81,7 @@ def getUsers():
 getUsers()
 ## 获取指定用户
 def getUser(name):
+    global users
     if len(users) == 0:
         getUsers()
     if len(users) == 0:
@@ -88,12 +89,15 @@ def getUser(name):
     return users[userMap[name]]
 ## 设置指定用户session
 def setUserSession(user, session):
+    global usersPath
     user['session'] = session
     with open(usersPath, "w") as file:
         file.write(json.dumps(users, indent=2))
     return True
 ## 移除指定用户session
 def removeUserSession(name):
+    global users
+    global usersPath
     user = users[userMap[name]]
     if user is None:
         return False
@@ -114,6 +118,7 @@ def userSignIn (name, pwd):
     return t
 ## 通过session匹配用户有效
 def matchUserBySession(session):
+    global users
     if session is None:
         return None
     for i in range(0, len(users)):
@@ -143,16 +148,18 @@ def userSignOut(session):
 tokens = { 'b': '', 'lat': '' }
 def getTokens():
     global tokens
+    global poePath
     if os.path.exists(poePath):
         poeConfig = json.load(open(poePath, 'r'))
-        if hasValidProperty(tokens, 'b'):
+        if hasValidProperty(poeConfig, 'b'):
             tokens['b'] = poeConfig['b']
-        if hasValidProperty(tokens, 'lat'):
+        if hasValidProperty(poeConfig, 'lat'):
             tokens['lat'] = poeConfig['lat']
         print(f'getTokens success: {tokens}')
 getTokens()
 def setTokens(b, lat):
     global tokens
+    global poePath
     tokens['b'] = b
     tokens['lat'] = lat
     with open(poePath, "w") as file:
@@ -163,6 +170,7 @@ html = {'content': ''}
 html_path = 'static/index.html'
 def getHTML():
     global html
+    global html_path
     if os.path.exists(html_path):
         with open(html_path, 'r') as file:
             html['content'] = file.read()
@@ -174,40 +182,72 @@ print(f'tokens:{tokens}')
 poeApi = { 'client': None, 'chats': [], 'chatMap': {} }
 def clientInit():
     global poeApi
+    if hasValidProperty(poeApi, 'client') and (poeApi['client'].ws_connected or poeApi['client'].ws_connecting):
+        poeApi['client'].disconnect_ws()
     poeApi['client'] = PoeApi(cookie=tokens)
+    poeApi['client'].on_ws_close=clientInit
+    poeApi['client'].on_ws_error=clientInit
+    
 def clientCheck():
     global poeApi
-    if 'chats' not in poeApi or poeApi['client'] is None:
+    if hasValidProperty(poeApi, 'client') is False:
         clientInit()
 def tokensUpdate():
     global poeApi
     getTokens()
     clientInit()
+def createChat(bot, message):
+    # print(bot, message)
+    global poeApi
+    clientCheck()
+    for chunk in poeApi['client'].send_message(bot, message):
+        pass
+    chat={
+        "id": chunk['id'],
+        "chatCode": chunk['chatCode'],
+        "chatId": chunk['chatId'],
+        "title": chunk['title'],
+        "bot": bot
+    }
+    print(chunk)
+    return chat
+getChatsLatest=time.time()
 # 获取聊天记录
 def getChats():
+    global getChatsLatest
+    global poeApi
     clientCheck()
+    now = time.time()
+    if now - getChatsLatest < 3:
+       return poeApi['chats']
+    getChatsLatest=now
     history = poeApi['client'].get_chat_history()['data']
     poeApi['chats'] = []
-
     for key, value in history.items():
         for i in range(0, len(value)):
             chat = value[i]
             chat['bot'] = key
             poeApi['chats'].append(chat)
             poeApi['chatMap'][str(chat['chatId'])] = chat
+    if len(poeApi['chats']) == 0:
+        return getChats()
     return poeApi['chats']
 # 发送消息
-def sendMsg(bot, message, chatId):
+def sendMsg(bot, message, chatId = None):
     # print(bot, chatId, message)
+    global poeApi
     clientCheck()
     for chunk in poeApi['client'].send_message(bot, message, chatId):
         pass
     s = chunk['text']
     return s
+def deleteChat(bot, chatId):
+    global poeApi
+    clientCheck()
+    poeApi['client'].delete_chat(bot, chatId=chatId)
 
 # Flask
 app = Flask(__name__)
-# app.config['STATIC_FOLDER'] = 'static'
 app.config['JSON_AS_ASCII'] = False
 app.json.ensure_ascii = False
 app.config['PORT'] = PORT
@@ -226,15 +266,17 @@ def loginRedirect():
     resp = make_response(redirect('/signin'))
     resp.delete_cookie(COOKIE_KEY)
     return resp
-def poeValid(chatId):
+def poeValid(chatId = None):
     if hasValidProperties(poeApi, ['chatMap']) is False:
         return False
-    if chatId is None or hasValidProperties(poeApi['chatMap'], [chatId]) is False:
+    if chatId is not None and hasValidProperties(poeApi['chatMap'], [chatId]) is False:
         return False
     return True
+processing={}
 # 发送聊天信息
 @app.route('/api/chats/<chatId>/send', methods=['GET', 'POST'])
 def sendMessage(chatId):
+    global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'error' }
     if poeValid(chatId) is False:
@@ -246,16 +288,61 @@ def sendMessage(chatId):
             return { 'status': False, 'code': 2, 'data': 'properties error' }
         message = request.json['msg']
     else:
-        if hasValidProperties(request.json, ['msg']) is False:
+        if hasValidProperties(request.args, ['msg']) is False:
             return { 'status': False, 'code': 2, 'data': 'properties error' }
         message = request.args['msg']
     if message is None or message == '':
         return { 'status': False, 'code': 2, 'data': 'msg is empty' }
-    reply=sendMsg(poeApi['chatMap'].get(chatId)['bot'], message, chatId)
+    bot = poeApi['chatMap'].get(chatId)['bot']
+    if processing.get(chatId):
+        poeApi['client'].chat_break(bot, chatId=chatId)
+    processing[chatId]=True
+    reply=sendMsg(bot, message, chatId)
+    processing[chatId]=False
     return {'status': True, 'code': 0, 'data': { 'send': message, 'reply': reply }}
+# 获取所有聊天
+@app.route('/api/chats/delete', methods=['POST'])
+def _deleteChat():
+    global poeApi
+    if auth() is False:
+        return { 'status': False, 'code': -1, 'data': 'role error' }
+    poeApi['chats'] = getChats()
+    if poeValid() is False:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
+    if hasValidProperties(request.json, ['bot']) is False:
+        return { 'status': False, 'code': 2, 'data': 'properties error' }
+    bot = request.json['bot']
+    if hasValidProperties(request.json, ['chatId']) is False:
+        return { 'status': False, 'code': 2, 'data': 'properties error' }
+    chatId = request.json['chatId']
+    deleteChat(bot, chatId)
+    return {'status': True, 'code': 0, 'data': ''}
+# 获取所有聊天
+@app.route('/api/chats/create', methods=['GET', 'POST'])
+def _createChat():
+    global poeApi
+    if auth() is False:
+        return { 'status': False, 'code': -1, 'data': 'role error' }
+    poeApi['chats'] = getChats()
+    if poeValid() is False:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
+    prompt="中文问题助手"
+    if request.method == 'POST' and hasValidProperties(request.json, ['prompt']):
+        prompt = request.json['prompt']
+    elif hasValidProperties(request.args, ['prompt']):
+        prompt = request.args['prompt']
+    bot='claude_2_1_bamboo'
+    if request.method == 'POST' and hasValidProperties(request.json, ['bot']):
+        prompt = request.json['bot']
+    elif hasValidProperties(request.args, ['bot']):
+        prompt = request.args['bot']
+    chat = createChat('claude_2_1_bamboo', prompt)
+
+    return {'status': True, 'code': 0, 'data': chat}
 # 获取单个信息
 @app.route('/api/chats/<chatId>/info', methods=['GET'])
 def queryChat(chatId):
+    global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
     if poeValid(chatId) is False:
@@ -266,6 +353,7 @@ def queryChat(chatId):
 # 获取所有聊天
 @app.route('/api/chats', methods=['GET'])
 def queryChats():
+    global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
     poeApi['chats'] = getChats()
@@ -281,7 +369,7 @@ def sign_out():
 # 登录接口
 @app.route('/api/signin', methods=['POST'])
 def sign_in():
-    if getValidProperties(request.json, ['username', 'password']) is False:
+    if hasValidProperties(request.json, ['username', 'password']) is False:
         return { 'status': False, 'code': 2, 'data': 'properties error' }
     t = userSignIn(request.json['username'], request.json['password'])
     if t is not None:
@@ -308,7 +396,7 @@ def admin():
         return loginRedirect()
     if auth('admin') is False:
         return redirect(url_for('index'))
-    return render_template('index.html', data={ 'currentPage': 'Admin', 'tokens': tokens }, content=html['content'])
+    return render_template('index.html', data={ 'currentPage': 'Admin', 'tokens': tokens, "role": "admin" }, content=html['content'])
 # 登出页
 @app.route('/signout', methods=['GET'])
 def logout():
@@ -325,7 +413,10 @@ def login():
 def index():
     if auth() is False:
         return loginRedirect()
-    return render_template('index.html', data={ 'currentPage': 'Home' }, content=html['content'])
+    role="user"
+    if auth('admin'):
+        role="admin"
+    return render_template('index.html', data={ 'currentPage': 'Home', "role": role }, content=html['content'])
 # 定义当出现 404 错误时的处理函数
 @app.errorhandler(404)
 def page_not_found(error):
