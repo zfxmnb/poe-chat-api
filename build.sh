@@ -4,7 +4,7 @@ if [[ $cmd != "dev" ]]; then
     cmd='build'
 fi
 cd app/
-if [ -d "app/node_modules" ]; then
+if [ ! -d "node_modules" ]; then
     yarn
 fi
 yarn $cmd
