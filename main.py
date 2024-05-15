@@ -466,7 +466,7 @@ def admin():
         return loginRedirect()
     if auth('admin') is False:
         return redirect(url_for('index'))
-    return render_template('index.html', data={ 'currentPage': 'Admin', 'tokens': tokens, "role": "admin" }, content=html['content'])
+    return render_template('index.html', data=json.dumps({ 'currentPage': 'Admin', 'tokens': tokens, "role": "admin" }), content=html['content'])
 # 登出页
 @app.route('/signout', methods=['GET'])
 def logout():
@@ -477,7 +477,7 @@ def login():
     if auth() is True:
         return redirect(url_for('index'))
     global tokens
-    return render_template('index.html', data={ 'currentPage': 'Signin' }, content=html['content'])
+    return render_template('index.html', data=json.dumps({ 'currentPage': 'Signin' }), content=html['content'])
 # 首页
 @app.route('/', methods=['GET'])
 def index():
@@ -490,7 +490,7 @@ def index():
     hasTokens = False
     if tokens['b'] and tokens['lat']:
         hasTokens = True
-    return render_template('index.html', data={ 'currentPage': 'Home', "role": role, "hasTokens": hasTokens }, content=html['content'])
+    return render_template('index.html', data=json.dumps({ 'currentPage': 'Home', "role": role, "hasTokens": hasTokens }), content=html['content'])
 # 定义当出现 404 错误时的处理函数
 @app.errorhandler(404)
 def page_not_found(error):
@@ -500,6 +500,6 @@ def main ():
     watch_file(usersPath, getUsers)
     watch_file(poePath, tokensUpdate)
     watch_file(html_path, getHTML)
-    app.run(port=PORT)
+    app.run(host='0.0.0.0', port=PORT)
 if __name__ == '__main__':
     main()

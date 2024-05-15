@@ -1,2 +1,3 @@
 flask == 3.0.3
 poe_api_wrapper == 1.4.1
+nest_asyncio == 1.6.0

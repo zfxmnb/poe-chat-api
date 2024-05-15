@@ -47,6 +47,6 @@ jobs:
             PORT=${{ vars.PORT }}
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/poe-chat-api-docker:${{ github.ref_name }}
-            ${{ secrets.DOCKER_USERNAME }}/poe-chat-api-:latest
+            ${{ secrets.DOCKER_USERNAME }}/poe-chat-api-docker:latest
           labels: ${{ steps.meta.outputs.labels }}
           builder: ${{ steps.buildx.outputs.name }}
