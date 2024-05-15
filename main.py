@@ -280,7 +280,7 @@ def queryBots(count=25, retry = 2):
     try:
         data = poeApi['client'].get_available_bots(count=count)
         bots = []
-        for value in data.items():
+        for _, value in data.items():
             bot = value.get('bot')
             bots.append(bot)
         return bots
