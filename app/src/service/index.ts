@@ -16,7 +16,7 @@ export const request = {
     })
       .then((res) => res.json() as unknown as Response<T>)
       .then((res) => {
-        if (res.status) {
+        if (res?.status) {
           return res.data;
         }
         errors.push({ [newUrl]: res.data ?? '接口错误' });
@@ -36,7 +36,7 @@ export const request = {
     })
       .then((res) => res.json() as unknown as Response<T>)
       .then((res) => {
-        if (res.status) {
+        if (res?.status) {
           return res.data;
         }
         errors.push({ [url]: res.data ?? '接口错误' });
@@ -89,4 +89,8 @@ export interface Bot {
 }
 export const queryBots = (data?: { count?: number }) => {
   return request.get<Bot[]>(`/api/bots`, data);
+};
+
+export const updateinstance = () => {
+  return request.post(`/api/instance`);
 };

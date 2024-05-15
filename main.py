@@ -2,7 +2,6 @@ import sys
 import os
 import string
 import random
-import re
 import json
 import time
 import hashlib
@@ -47,7 +46,7 @@ def watch_fork(file_path, callback):
         if current_time > listens[file_path]:
             callback()
             listens[file_path] = current_time
-        time.sleep(5)
+        time.sleep(15)
 ## 文件变动监听
 def watch_file(file_path, callback): 
     p = Thread(target=watch_fork, args=(file_path, callback))
@@ -180,22 +179,27 @@ getHTML()
 # peo
 print(f'tokens:{tokens}')
 poeApi = { 'client': None, 'chats': [], 'chatMap': {} }
-def clientInit():
+def clientInit(retry=0):
     global poeApi
-    if hasValidProperty(poeApi, 'client') and (poeApi['client'].ws_connected or poeApi['client'].ws_connecting):
+    if hasValidProperty(poeApi, 'client'):
+        poeApi['client'].on_ws_close=None
+        poeApi['client'].on_ws_error=None
         poeApi['client'].disconnect_ws()
+        poeApi['client'].client.close()
     poeApi['client'] = PoeApi(cookie=tokens)
-    poeApi['client'].on_ws_close=clientInit
-    poeApi['client'].on_ws_error=clientInit
+    if retry != 0:
+        poeApi['client'].on_ws_close=clientInit
+        poeApi['client'].on_ws_error=clientInit
+    time.sleep(1)
     
 def clientCheck():
     global poeApi
     if hasValidProperty(poeApi, 'client') is False:
-        clientInit()
+        clientInit(1)
 def tokensUpdate():
     global poeApi
     getTokens()
-    clientInit()
+    clientInit(1)
 def createChat(bot, message, retry = 2):
     if retry == 0:
         return None
@@ -205,9 +209,8 @@ def createChat(bot, message, retry = 2):
         for chunk in poeApi['client'].send_message(bot, message):
             pass
     except:
-        if retry == 1:
-            clientInit()
-            time.sleep(2)
+        if retry == 2:
+            clientInit(1)
         return createChat(bot, message, retry - 1)
     chat={
         "id": chunk['id'],
@@ -232,9 +235,8 @@ def getChats(retry = 2):
     try:
         history = poeApi['client'].get_chat_history()['data']
     except:
-        if retry == 1:
-            clientInit()
-            time.sleep(2)
+        if retry == 2:
+            clientInit(1)
         return getChats(retry - 1)
     poeApi['chats'] = []
     for key, value in history.items():
@@ -255,9 +257,8 @@ def sendMsg(bot, message, chatId = None, retry = 2):
             pass
         return chunk['text']
     except:
-        if retry == 1:
-            clientInit()
-            time.sleep(2)
+        if retry == 2:
+            clientInit(1)
         return sendMsg(bot, message, chatId, retry - 1)
 def deleteChat(bot, chatId, retry = 2):
     if retry == 0:
@@ -268,9 +269,8 @@ def deleteChat(bot, chatId, retry = 2):
         poeApi['client'].delete_chat(bot, chatId=chatId)
         return True
     except:
-        if retry == 1:
-            clientInit()
-            time.sleep(2)
+        if retry == 2:
+            clientInit(1)
         return deleteChat(bot, chatId, retry)
 def queryBots(count=25, retry = 2):
     if retry == 0:
@@ -280,14 +280,13 @@ def queryBots(count=25, retry = 2):
     try:
         data = poeApi['client'].get_available_bots(count=count)
         bots = []
-        for key, value in data.items():
+        for value in data.items():
             bot = value.get('bot')
             bots.append(bot)
         return bots
     except:
-        if retry == 1:
-            clientInit()
-            time.sleep(2)
+        if retry == 2:
+            clientInit(1)
         return queryBots(count, retry - 1)
 
 # Flask
@@ -319,7 +318,7 @@ def poeValid(chatId = None):
 processing={}
 # 发送聊天信息
 @app.route('/api/chats/<chatId>/send', methods=['GET', 'POST'])
-def sendMessage(chatId):
+def send_message(chatId):
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'error' }
@@ -350,7 +349,7 @@ def sendMessage(chatId):
     return {'status': True, 'code': 0, 'data': { 'send': message, 'reply': reply }}
 # 获取所有聊天
 @app.route('/api/chats/delete', methods=['POST'])
-def _deleteChat():
+def delete_chat():
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
@@ -370,7 +369,7 @@ def _deleteChat():
     return {'status': True, 'code': 0, 'data': ''}
 # 获取所有聊天
 @app.route('/api/chats/create', methods=['GET', 'POST'])
-def _createChat():
+def create_chat():
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
@@ -392,7 +391,7 @@ def _createChat():
     return {'status': True, 'code': 0, 'data': chat}
 # 获取单个信息
 @app.route('/api/chats/<chatId>/info', methods=['GET'])
-def queryChat(chatId):
+def query_chat(chatId):
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
@@ -406,7 +405,7 @@ def queryChat(chatId):
     return {'status': True, 'code': 0, 'data': poeApi['chatMap'].get(chatId)}
 # 获取所有聊天
 @app.route('/api/chats', methods=['GET'])
-def queryChats():
+def query_chats():
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
@@ -457,6 +456,14 @@ def post_tokens():
     b = request.json['b']
     lat = request.json['lat']
     setTokens(b, lat)
+    resp = make_response({ 'status': True, 'code': 0, 'data': '' })
+    return resp
+# 更新实例
+@app.route('/api/instance', methods=['POST'])
+def update_instance():
+    if auth() is False:
+        return { 'status': False, 'code': -1, 'data': 'role error' }
+    clientInit(1)
     resp = make_response({ 'status': True, 'code': 0, 'data': '' })
     return resp
 # 管理页

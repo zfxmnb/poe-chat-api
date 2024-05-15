@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'preact/hooks';
-import { type Chat, type Bot, getChats, sendMessage, createChat, deleteChat, queryBots } from '../../service';
+import { type Chat, type Bot, getChats, sendMessage, createChat, deleteChat, queryBots, updateinstance } from '../../service';
 import cs from 'classnames';
 import Markdown from 'markdown-to-jsx';
 import styles from './index.module.less';
@@ -60,6 +60,9 @@ export function Home() {
         })
         .catch(() => {
           setLoading(false);
+          if (confirm('发送消息异常稍后再试，或立即调用刷新服务')) {
+            updateinstance()
+          }
         });
     }
   };
