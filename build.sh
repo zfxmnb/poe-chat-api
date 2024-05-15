@@ -3,7 +3,8 @@ cmd=$1
 if [[ $cmd != "dev" ]]; then
     cmd='build'
 fi
+cd app/
 if [ -d "app/node_modules" ]; then
     yarn
 fi
-cd app/ && yarn $cmd
+yarn $cmd

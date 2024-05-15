@@ -4,7 +4,7 @@ interface Response<T> {
   data: T;
 }
 let errors: Record<string, any>[] = [];
-let t = null;
+let t: number | null | undefined = null;
 export const request = {
   get: function <T = any>(url: string, params?: Record<string, any>) {
     let newUrl = url;
@@ -20,6 +20,7 @@ export const request = {
           return res.data;
         }
         errors.push({ [newUrl]: res.data ?? '接口错误' });
+        t && clearTimeout(t);
         t = setTimeout(() => {
           errors.length && alert(JSON.stringify(errors, null, 2));
           errors = [];
@@ -78,4 +79,14 @@ export const createChat = (data: { bot: string; prompt: string }) => {
 
 export const deleteChat = (data: { bot: string; chatId: string }) => {
   return request.post(`/api/chats/delete`, data);
+};
+
+export interface Bot {
+  nickname: string;
+  displayName: string;
+  isLimitedAccess: boolean;
+  limitedAccessType: 'no_limit' | 'subscriber_access';
+}
+export const queryBots = (data?: { count?: number }) => {
+  return request.get<Bot[]>(`/api/bots`, data);
 };

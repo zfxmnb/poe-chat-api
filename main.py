@@ -11,20 +11,20 @@ from flask import Flask, render_template, url_for, redirect, request, make_respo
 from poe_api_wrapper import PoeApi
 
 # 获取环境变量的值
-CACHE_DIR = os.environ.get('PEO_CACHE_DIR')
-if CACHE_DIR is None:
-    CACHE_DIR = '.data'
+DATA_DIR = os.environ.get('DATA_DIR')
+if DATA_DIR is None:
+    DATA_DIR = '.data'
 PORT = os.environ.get('PEO_PORT')
 if PORT is None:
-    PORT = 5000
+    PORT = 80
 COOKIE_KEY='s_t'
 listens = {}
 loginExpires = time.time() + 60 * 60 * 24 * 15
-usersPath = f'{CACHE_DIR}/users.json'
-poePath=f'{CACHE_DIR}/poe.json'
+usersPath = f'{DATA_DIR}/users.json'
+poePath=f'{DATA_DIR}/poe.json'
 # 缺少配置文件直接退出
 if os.path.exists(poePath) is False or os.path.exists(usersPath) is False:
-    print(f'[{CACHE_DIR}/]目录下缺少poe.json或users.json配置文件')
+    print(f'[{DATA_DIR}/]目录下缺少poe.json或users.json配置文件')
     sys.exit(0)
 
 # 基础方法
@@ -196,12 +196,19 @@ def tokensUpdate():
     global poeApi
     getTokens()
     clientInit()
-def createChat(bot, message):
-    # print(bot, message)
+def createChat(bot, message, retry = 2):
+    if retry == 0:
+        return None
     global poeApi
     clientCheck()
-    for chunk in poeApi['client'].send_message(bot, message):
-        pass
+    try:
+        for chunk in poeApi['client'].send_message(bot, message):
+            pass
+    except:
+        if retry == 1:
+            clientInit()
+            time.sleep(2)
+        return createChat(bot, message, retry - 1)
     chat={
         "id": chunk['id'],
         "chatCode": chunk['chatCode'],
@@ -209,11 +216,12 @@ def createChat(bot, message):
         "title": chunk['title'],
         "bot": bot
     }
-    print(chunk)
     return chat
 getChatsLatest=time.time()
 # 获取聊天记录
-def getChats():
+def getChats(retry = 2):
+    if retry == 0:
+        return None
     global getChatsLatest
     global poeApi
     clientCheck()
@@ -221,7 +229,13 @@ def getChats():
     if now - getChatsLatest < 3:
        return poeApi['chats']
     getChatsLatest=now
-    history = poeApi['client'].get_chat_history()['data']
+    try:
+        history = poeApi['client'].get_chat_history()['data']
+    except:
+        if retry == 1:
+            clientInit()
+            time.sleep(2)
+        return getChats(retry - 1)
     poeApi['chats'] = []
     for key, value in history.items():
         for i in range(0, len(value)):
@@ -229,22 +243,52 @@ def getChats():
             chat['bot'] = key
             poeApi['chats'].append(chat)
             poeApi['chatMap'][str(chat['chatId'])] = chat
-    if len(poeApi['chats']) == 0:
-        return getChats()
     return poeApi['chats']
 # 发送消息
-def sendMsg(bot, message, chatId = None):
-    # print(bot, chatId, message)
+def sendMsg(bot, message, chatId = None, retry = 2):
+    if retry == 0:
+        return None
     global poeApi
     clientCheck()
-    for chunk in poeApi['client'].send_message(bot, message, chatId):
-        pass
-    s = chunk['text']
-    return s
-def deleteChat(bot, chatId):
+    try:
+        for chunk in poeApi['client'].send_message(bot, message, chatId):
+            pass
+        return chunk['text']
+    except:
+        if retry == 1:
+            clientInit()
+            time.sleep(2)
+        return sendMsg(bot, message, chatId, retry - 1)
+def deleteChat(bot, chatId, retry = 2):
+    if retry == 0:
+        return False
     global poeApi
     clientCheck()
-    poeApi['client'].delete_chat(bot, chatId=chatId)
+    try:
+        poeApi['client'].delete_chat(bot, chatId=chatId)
+        return True
+    except:
+        if retry == 1:
+            clientInit()
+            time.sleep(2)
+        return deleteChat(bot, chatId, retry)
+def queryBots(count=25, retry = 2):
+    if retry == 0:
+        return None
+    global poeApi
+    clientCheck()
+    try:
+        data = poeApi['client'].get_available_bots(count=count)
+        bots = []
+        for key, value in data.items():
+            bot = value.get('bot')
+            bots.append(bot)
+        return bots
+    except:
+        if retry == 1:
+            clientInit()
+            time.sleep(2)
+        return queryBots(count, retry - 1)
 
 # Flask
 app = Flask(__name__)
@@ -279,10 +323,6 @@ def sendMessage(chatId):
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'error' }
-    if poeValid(chatId) is False:
-        poeApi['chats'] = getChats()
-    if poeValid(chatId) is False:
-        return { 'status': False, 'code': 1, 'data': 'poe error' }
     if request.method == 'POST':
         if hasValidProperties(request.json, ['msg']) is False:
             return { 'status': False, 'code': 2, 'data': 'properties error' }
@@ -293,12 +333,20 @@ def sendMessage(chatId):
         message = request.args['msg']
     if message is None or message == '':
         return { 'status': False, 'code': 2, 'data': 'msg is empty' }
+    if poeValid(chatId) is False:
+        chats = getChats()
+        if chats is not None:
+            poeApi['chats'] = chats
+    if poeValid(chatId) is False:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
     bot = poeApi['chatMap'].get(chatId)['bot']
     if processing.get(chatId):
         poeApi['client'].chat_break(bot, chatId=chatId)
     processing[chatId]=True
     reply=sendMsg(bot, message, chatId)
     processing[chatId]=False
+    if reply is None:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
     return {'status': True, 'code': 0, 'data': { 'send': message, 'reply': reply }}
 # 获取所有聊天
 @app.route('/api/chats/delete', methods=['POST'])
@@ -306,15 +354,18 @@ def _deleteChat():
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
-    poeApi['chats'] = getChats()
-    if poeValid() is False:
-        return { 'status': False, 'code': 1, 'data': 'poe error' }
     if hasValidProperties(request.json, ['bot']) is False:
         return { 'status': False, 'code': 2, 'data': 'properties error' }
     bot = request.json['bot']
     if hasValidProperties(request.json, ['chatId']) is False:
         return { 'status': False, 'code': 2, 'data': 'properties error' }
-    chatId = request.json['chatId']
+    chatId = str(request.json['chatId'])
+    if poeValid(chatId) is False:
+        chats = getChats()
+        if chats is not None:
+            poeApi['chats'] = chats
+    if poeValid(chatId) is False:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
     deleteChat(bot, chatId)
     return {'status': True, 'code': 0, 'data': ''}
 # 获取所有聊天
@@ -323,7 +374,6 @@ def _createChat():
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
-    poeApi['chats'] = getChats()
     if poeValid() is False:
         return { 'status': False, 'code': 1, 'data': 'poe error' }
     prompt="中文问题助手"
@@ -333,11 +383,12 @@ def _createChat():
         prompt = request.args['prompt']
     bot='claude_2_1_bamboo'
     if request.method == 'POST' and hasValidProperties(request.json, ['bot']):
-        prompt = request.json['bot']
+        bot = request.json['bot']
     elif hasValidProperties(request.args, ['bot']):
-        prompt = request.args['bot']
-    chat = createChat('claude_2_1_bamboo', prompt)
-
+        bot = request.args['bot']
+    chat = createChat(bot, prompt)
+    if chat is None:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
     return {'status': True, 'code': 0, 'data': chat}
 # 获取单个信息
 @app.route('/api/chats/<chatId>/info', methods=['GET'])
@@ -345,8 +396,11 @@ def queryChat(chatId):
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
+    chats = poeApi['chats']
     if poeValid(chatId) is False:
-        poeApi['chats'] = getChats()
+        chats = getChats()
+        if chats is not None:
+            poeApi['chats'] = chats
     if poeValid(chatId) is False:
         return { 'status': False, 'code': 1, 'data': 'poe error' }
     return {'status': True, 'code': 0, 'data': poeApi['chatMap'].get(chatId)}
@@ -356,10 +410,26 @@ def queryChats():
     global poeApi
     if auth() is False:
         return { 'status': False, 'code': -1, 'data': 'role error' }
-    poeApi['chats'] = getChats()
     if poeValid() is False:
         return { 'status': False, 'code': 1, 'data': 'poe error' }
-    return {'status': True, 'code': 0, 'data': poeApi['chats']}
+    chats = getChats()
+    if chats is None:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
+    poeApi['chats'] = chats
+    return {'status': True, 'code': 0, 'data': chats}
+@app.route('/api/bots', methods=['GET'])
+def _queryBots():
+    global poeApi
+    if auth() is False:
+        return { 'status': False, 'code': -1, 'data': 'role error' }
+    if poeValid() is False:
+        return { 'status': False, 'code': 1, 'data': 'poe error' }
+    if hasValidProperties(request.args, ['count']):
+        count = int(request.args['count'])
+    bots = queryBots(count)
+    if bots is None:
+        return { 'status': False, 'code': 1, 'data': 'bots error' }
+    return {'status': True, 'code': 0, 'data': bots}
 # 登出接口
 @app.route('/api/signout', methods=['GET', 'POST'])
 def sign_out():
@@ -416,7 +486,11 @@ def index():
     role="user"
     if auth('admin'):
         role="admin"
-    return render_template('index.html', data={ 'currentPage': 'Home', "role": role }, content=html['content'])
+    
+    hasTokens = False
+    if tokens['b'] and tokens['lat']:
+        hasTokens = True
+    return render_template('index.html', data={ 'currentPage': 'Home', "role": role, "hasTokens": hasTokens }, content=html['content'])
 # 定义当出现 404 错误时的处理函数
 @app.errorhandler(404)
 def page_not_found(error):

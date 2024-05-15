@@ -1,28 +1,10 @@
 import { useEffect, useState, useRef } from 'preact/hooks';
-import { type Chat, getChats, sendMessage, createChat, deleteChat } from '../../service';
+import { type Chat, type Bot, getChats, sendMessage, createChat, deleteChat, queryBots } from '../../service';
 import cs from 'classnames';
 import Markdown from 'markdown-to-jsx';
 import styles from './index.module.less';
 const data = window.__INIT__ ?? {};
-// 免费bot
-const bots = [
-  'claude_2_1_bamboo',
-  'a2',
-  'capybara',
-  'chinchilla',
-  'gpt3_5',
-  'chinchilla_instruct',
-  'acouchy',
-  'llama_2_7b_chat',
-  'llama_2_13b_chat',
-  'llama_2_70b_chat',
-  'code_llama_7b_instruct',
-  'code_llama_13b_instruct',
-  'code_llama_34b_instruct',
-  'upstage_solar_0_70b_16bit',
-  'claude_3_haiku',
-  'claude_3_haiku_200k'
-];
+
 const defaultPrompt = '中文问题助手';
 let ChatMap = {};
 try {
@@ -32,15 +14,24 @@ export function Home() {
   const [chats, setChats] = useState<Chat[]>([]);
   const [chat, setChat] = useState<Chat>();
   const [loading, setLoading] = useState(false);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [chatMap, setChatMap] = useState<Record<string, { send: string; reply?: string }[]>>(ChatMap);
   const [prompt, setPrompt] = useState(defaultPrompt);
-  const [bot, setBot] = useState(bots[0]);
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [bot, setBot] = useState<string>(bots[0]?.nickname);
 
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    getChats().then((data) => {
-      setChats(data);
-    });
+    if (data?.hasTokens !== false) {
+      getChats().then((data) => {
+        setChats(data);
+      });
+      queryBots({ count: 25 }).then((bots) => {
+        setBots(bots);
+        setBot(bots[0]?.nickname);
+      });
+    }
   }, []);
 
   const openChat = (chatId: string) => {
@@ -51,18 +42,19 @@ export function Home() {
   const sendMsg = () => {
     const msg = inputRef.current?.value?.trim();
     if (chat && msg) {
+      const chatId = chat.chatId;
       inputRef.current && (inputRef.current.value = '');
       setLoading(true);
-      chatMap[chat.chatId] = chatMap[chat.chatId] || [];
-      chatMap[chat.chatId].push({ send: msg });
+      chatMap[chatId] = chatMap[chatId] || [];
+      chatMap[chatId].push({ send: msg });
       setChatMap({ ...chatMap });
       sendMessage({
-        chatId: chat.chatId,
+        chatId,
         msg
       })
         .then((data) => {
-          chatMap[chat.chatId] = chatMap[chat.chatId] || [];
-          chatMap[chat.chatId][chatMap[chat.chatId].length - 1] = { send: data.send, reply: data.reply };
+          chatMap[chatId] = chatMap[chatId] || [];
+          chatMap[chatId][chatMap[chatId].length - 1] = { send: data.send, reply: data.reply };
           setChatMap({ ...chatMap });
           setLoading(false);
         })
@@ -72,25 +64,38 @@ export function Home() {
     }
   };
   const handleAddChat = () => {
-    if (!prompt) {
-      alert('请输入初始prompt');
+    if (!prompt || !bot) {
+      alert('请输入初始Prompt和选择AI');
       return;
     }
-    confirm('确定要添加新的聊天吗？') &&
-      createChat({ bot, prompt }).then((data) => {
-        setChats([...chats, data]);
-        setChat(data);
-      });
+    if (confirm('确定要添加新的聊天吗？')) {
+      setCreateLoading(true);
+      createChat({ bot, prompt })
+        .then((data) => {
+          setChats([...chats, data]);
+          setChat(data);
+          setCreateLoading(false);
+        })
+        .catch(() => {
+          setCreateLoading(false);
+        });
+    }
   };
   const handleDeleteChat = (e: MouseEvent, bot: string, chatId: string) => {
     e.stopPropagation();
     if (confirm('确定要删除该聊天吗？')) {
-      deleteChat({ bot, chatId }).then(() => {
-        setChats(chats.filter((chat) => chat.chatId !== chatId));
-        if (chat?.chatId === chatId) {
-          setChat(undefined);
-        }
-      });
+      setDeleteLoading(true);
+      deleteChat({ bot, chatId })
+        .then(() => {
+          setChats(chats.filter((chat) => chat.chatId !== chatId));
+          if (chat?.chatId === chatId) {
+            setChat(undefined);
+          }
+          setDeleteLoading(false);
+        })
+        .catch(() => {
+          setDeleteLoading(false);
+        });
     }
   };
   const clearCache = () => {
@@ -128,18 +133,19 @@ export function Home() {
               <div className={cs(styles.chat, { [styles.selected]: chat?.chatId === chatId })} onClick={() => openChat(chatId)}>
                 <h3 className={styles.chatTitle}>{title ?? '[无标题]'}</h3>
                 <p className={styles.chatBot}>{bot}</p>
-                <a onClick={(e) => handleDeleteChat(e, bot, chatId)} href="javascript: void 0;">
+                <a style={{ opacity: deleteLoading ? 0.5 : 1 }} onClick={(e) => !deleteLoading && handleDeleteChat(e, bot, chatId)} href="javascript: void 0;">
                   删除
                 </a>
               </div>
             );
           })}
         </div>
-        <div className={styles.create}>
+        <div hidden={!bots?.length} className={styles.create}>
           <input
             className={styles.prompt}
             id="prompt"
             value={prompt}
+            placeholder="请输入初始Prompt"
             onChange={(e) => {
               // @ts-ignore
               setPrompt(e?.target?.value ?? '');
@@ -156,12 +162,18 @@ export function Home() {
             }}
           >
             {bots.map((bot) => {
-              return <option value={bot}>{bot}</option>;
+              return (
+                <option disabled={bot.isLimitedAccess} key={bot.nickname} value={bot?.nickname}>
+                  {bot.displayName}({bot.nickname})
+                </option>
+              );
             })}
           </select>
-          <button className={styles.addChat} onClick={() => handleAddChat()}>
-            添加聊天
-          </button>
+          {!createLoading ? (
+            <button className={styles.addChat} onClick={() => handleAddChat()}>
+              添加聊天
+            </button>
+          ) : null}
         </div>
       </div>
       <div className={styles.chatView}>
@@ -169,7 +181,7 @@ export function Home() {
           <div className={styles.chatContent}>
             <div className={styles.chatTitle}>
               <div>
-                <span className={styles.chatName}>{chat.title}</span> - {chat.bot}
+                <span className={styles.chatName}>{chat.title ?? '[无标题]'}</span> - {chat.bot}
               </div>
             </div>
             <div className={styles.chatTexts}>
